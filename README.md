@@ -3,9 +3,7 @@
 Install agent skills onto your coding agents from any git repository.
 
 <!-- agent-list:start -->
-
-Supports **Opencode**, **Claude Code**, **Codex**, **Cursor**, and [18 more](#available-agents).
-
+Supports **Opencode**, **Claude Code**, **Codex**, **Cursor**, and [19 more](#available-agents).
 <!-- agent-list:end -->
 
 ## Quick Start
@@ -83,33 +81,31 @@ npx add-skill vercel-labs/agent-skills -y -g
 Skills can be installed to any of these supported agents. Use `-g, --global` to install to the global path instead of project-level.
 
 <!-- available-agents:start -->
-
-| Agent          | `--agent`        | Project Path           | Global Path                     |
-| -------------- | ---------------- | ---------------------- | ------------------------------- |
-| Amp            | `amp`            | `.agents/skills/`      | `~/.config/agents/skills/`      |
-| Antigravity    | `antigravity`    | `.agent/skills/`       | `~/.gemini/antigravity/skills/` |
-| Claude Code    | `claude-code`    | `.claude/skills/`      | `~/.claude/skills/`             |
-| Clawdbot       | `clawdbot`       | `skills/`              | `~/.clawdbot/skills/`           |
-| Cline          | `cline`          | `.cline/skills/`       | `~/.cline/skills/`              |
-| Codex          | `codex`          | `.codex/skills/`       | `~/.codex/skills/`              |
-| Command Code   | `command-code`   | `.commandcode/skills/` | `~/.commandcode/skills/`        |
-| Cursor         | `cursor`         | `.cursor/skills/`      | `~/.cursor/skills/`             |
-| Droid          | `droid`          | `.factory/skills/`     | `~/.factory/skills/`            |
-| Gemini CLI     | `gemini-cli`     | `.gemini/skills/`      | `~/.gemini/skills/`             |
-| GitHub Copilot | `github-copilot` | `.github/skills/`      | `~/.copilot/skills/`            |
-| Goose          | `goose`          | `.goose/skills/`       | `~/.config/goose/skills/`       |
-| Kilo Code      | `kilo`           | `.kilocode/skills/`    | `~/.kilocode/skills/`           |
-| Kiro CLI       | `kiro-cli`       | `.kiro/skills/`        | `~/.kiro/skills/`               |
-| Neovate        | `neovate`        | `.neovate/skills/`     | `~/.neovate/skills/`            |
-| OpenCode       | `opencode`       | `.opencode/skills/`    | `~/.config/opencode/skills/`    |
-| OpenHands      | `openhands`      | `.openhands/skills/`   | `~/.openhands/skills/`          |
-| Pi             | `pi`             | `.pi/skills/`          | `~/.pi/agent/skills/`           |
-| Qoder          | `qoder`          | `.qoder/skills/`       | `~/.qoder/skills/`              |
-| Roo Code       | `roo`            | `.roo/skills/`         | `~/.roo/skills/`                |
-| Trae           | `trae`           | `.trae/skills/`        | `~/.trae/skills/`               |
-| Windsurf       | `windsurf`       | `.windsurf/skills/`    | `~/.codeium/windsurf/skills/`   |
-| Zencoder       | `zencoder`       | `.zencoder/skills/`    | `~/.zencoder/skills/`           |
-
+| Agent | `--agent` | Project Path | Global Path |
+|-------|-----------|--------------|-------------|
+| Amp | `amp` | `.agents/skills/` | `~/.config/agents/skills/` |
+| Antigravity | `antigravity` | `.agent/skills/` | `~/.gemini/antigravity/skills/` |
+| Claude Code | `claude-code` | `.claude/skills/` | `~/.claude/skills/` |
+| Clawdbot | `clawdbot` | `skills/` | `~/.clawdbot/skills/` |
+| Cline | `cline` | `.cline/skills/` | `~/.cline/skills/` |
+| Codex | `codex` | `.codex/skills/` | `~/.codex/skills/` |
+| Command Code | `command-code` | `.commandcode/skills/` | `~/.commandcode/skills/` |
+| Cursor | `cursor` | `.cursor/skills/` | `~/.cursor/skills/` |
+| Droid | `droid` | `.factory/skills/` | `~/.factory/skills/` |
+| Gemini CLI | `gemini-cli` | `.gemini/skills/` | `~/.gemini/skills/` |
+| GitHub Copilot | `github-copilot` | `.github/skills/` | `~/.copilot/skills/` |
+| Goose | `goose` | `.goose/skills/` | `~/.config/goose/skills/` |
+| Kilo Code | `kilo` | `.kilocode/skills/` | `~/.kilocode/skills/` |
+| Kiro CLI | `kiro-cli` | `.kiro/skills/` | `~/.kiro/skills/` |
+| OpenCode | `opencode` | `.opencode/skills/` | `~/.config/opencode/skills/` |
+| OpenHands | `openhands` | `.openhands/skills/` | `~/.openhands/skills/` |
+| Pi | `pi` | `.pi/skills/` | `~/.pi/agent/skills/` |
+| Qoder | `qoder` | `.qoder/skills/` | `~/.qoder/skills/` |
+| Roo Code | `roo` | `.roo/skills/` | `~/.roo/skills/` |
+| Trae | `trae` | `.trae/skills/` | `~/.trae/skills/` |
+| Windsurf | `windsurf` | `.windsurf/skills/` | `~/.codeium/windsurf/skills/` |
+| Zencoder | `zencoder` | `.zencoder/skills/` | `~/.zencoder/skills/` |
+| Neovate | `neovate` | `.neovate/skills/` | `~/.neovate/skills/` |
 <!-- available-agents:end -->
 
 > [!NOTE]
@@ -159,15 +155,15 @@ Describe the scenarios where this skill should be used.
 The CLI searches for skills in these locations within a repository:
 
 <!-- skill-discovery:start -->
-
 - Root directory (if it contains `SKILL.md`)
 - `skills/`
 - `skills/.curated/`
 - `skills/.experimental/`
 - `skills/.system/`
-- `.agent/skills/`
 - `.agents/skills/`
+- `.agent/skills/`
 - `.claude/skills/`
+- `./skills/`
 - `.cline/skills/`
 - `.codex/skills/`
 - `.commandcode/skills/`
@@ -178,7 +174,6 @@ The CLI searches for skills in these locations within a repository:
 - `.goose/skills/`
 - `.kilocode/skills/`
 - `.kiro/skills/`
-- `.neovate/skills/`
 - `.opencode/skills/`
 - `.openhands/skills/`
 - `.pi/skills/`
@@ -187,6 +182,7 @@ The CLI searches for skills in these locations within a repository:
 - `.trae/skills/`
 - `.windsurf/skills/`
 - `.zencoder/skills/`
+- `.neovate/skills/`
 <!-- skill-discovery:end -->
 
 If no skills are found in standard locations, a recursive search is performed.

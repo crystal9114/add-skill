@@ -42,7 +42,6 @@
     "goose",
     "kilo",
     "kiro-cli",
-    "neovate",
     "opencode",
     "openhands",
     "pi",
@@ -50,7 +49,8 @@
     "roo",
     "trae",
     "windsurf",
-    "zencoder"
+    "zencoder",
+    "neovate"
   ],
   "repository": {
     "type": "git",
