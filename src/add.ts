@@ -73,6 +73,56 @@ function multiselect<Value>(opts: {
   }) as Promise<Value[] | symbol>;
 }
 
+/**
+ * Two-step agent selection: first ask "all agents" or "select specific",
+ * then show the multiselect only if user wants to select specific agents.
+ */
+async function selectAgentsInteractive(
+  availableAgents: AgentType[],
+  options: { global?: boolean }
+): Promise<AgentType[] | symbol> {
+  // First step: ask if user wants all agents or to select specific ones
+  const installChoice = await p.select({
+    message: 'Install to',
+    options: [
+      {
+        value: 'all',
+        label: 'All agents (Recommended)',
+        hint: `Install to all ${availableAgents.length} detected agents`,
+      },
+      {
+        value: 'select',
+        label: 'Select specific agents',
+        hint: 'Choose which agents to install to',
+      },
+    ],
+  });
+
+  if (p.isCancel(installChoice)) {
+    return installChoice;
+  }
+
+  if (installChoice === 'all') {
+    return availableAgents;
+  }
+
+  // Second step: show multiselect for specific agent selection
+  const agentChoices = availableAgents.map((a) => ({
+    value: a,
+    label: agents[a].displayName,
+    hint: `${options.global ? agents[a].globalSkillsDir : agents[a].skillsDir}`,
+  }));
+
+  const selected = await multiselect({
+    message: 'Select agents to install skills to',
+    options: agentChoices,
+    required: true,
+    initialValues: [], // Start with none selected for easier picking
+  });
+
+  return selected as AgentType[] | symbol;
+}
+
 const version = packageJson.version;
 setVersion(version);
 
@@ -203,18 +253,7 @@ async function handleRemoteSkill(
         );
       }
     } else {
-      const agentChoices = installedAgents.map((a) => ({
-        value: a,
-        label: agents[a].displayName,
-        hint: `${options.global ? agents[a].globalSkillsDir : agents[a].skillsDir}`,
-      }));
-
-      const selected = await multiselect({
-        message: 'Select agents to install skills to',
-        options: agentChoices,
-        required: true,
-        initialValues: installedAgents,
-      });
+      const selected = await selectAgentsInteractive(installedAgents, { global: options.global });
 
       if (p.isCancel(selected)) {
         p.cancel('Installation cancelled');
@@ -558,18 +597,7 @@ async function handleDirectUrlSkillLegacy(
         );
       }
     } else {
-      const agentChoices = installedAgents.map((a) => ({
-        value: a,
-        label: agents[a].displayName,
-        hint: `${options.global ? agents[a].globalSkillsDir : agents[a].skillsDir}`,
-      }));
-
-      const selected = await multiselect({
-        message: 'Select agents to install skills to',
-        options: agentChoices,
-        required: true,
-        initialValues: installedAgents,
-      });
+      const selected = await selectAgentsInteractive(installedAgents, { global: options.global });
 
       if (p.isCancel(selected)) {
         p.cancel('Installation cancelled');
@@ -986,18 +1014,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
           );
         }
       } else {
-        const agentChoices = installedAgents.map((a) => ({
-          value: a,
-          label: agents[a].displayName,
-          hint: `${options.global ? agents[a].globalSkillsDir : agents[a].skillsDir}`,
-        }));
-
-        const selected = await multiselect({
-          message: 'Select agents to install skills to',
-          options: agentChoices,
-          required: true,
-          initialValues: installedAgents,
-        });
+        const selected = await selectAgentsInteractive(installedAgents, { global: options.global });
 
         if (p.isCancel(selected)) {
           p.cancel('Installation cancelled');
