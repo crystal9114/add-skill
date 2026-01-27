@@ -3,7 +3,7 @@ import { join, resolve } from 'path';
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import * as p from '@clack/prompts';
-import chalk from 'chalk';
+import pc from 'picocolors';
 
 interface SkillManifestEntry {
   name: string;
@@ -28,7 +28,7 @@ export async function updateManifest(entry: SkillManifestEntry): Promise<void> {
     // Try parent directory if we are in a subfolder (e.g. skills/add-skill)
     manifestPath = join(process.cwd(), '..', 'skills-manifest.json');
     if (!existsSync(manifestPath)) {
-      p.log.warn(chalk.yellow('Could not find skills-manifest.json to update locally.'));
+      p.log.warn(pc.yellow('Could not find skills-manifest.json to update locally.'));
       return;
     }
   }
