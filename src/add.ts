@@ -1,7 +1,10 @@
 import * as p from '@clack/prompts';
 import chalk from 'chalk';
 import { existsSync } from 'fs';
+import { mkdir } from 'fs/promises';
 import { homedir } from 'os';
+import { join } from 'path';
+import { spawnSync } from 'child_process';
 import { parseSource, getOwnerRepo } from './source-parser.js';
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.js';
 import { discoverSkills, getSkillDisplayName } from './skills.js';
@@ -25,6 +28,8 @@ import {
   dismissPrompt,
 } from './skill-lock.js';
 import type { Skill, AgentType, RemoteSkill } from './types.js';
+import { smartAnalyze, analyzeContent } from './smart-analyzer.js';
+import { updateManifest, triggerUpdateScript } from './manifest-manager.js';
 import packageJson from '../package.json' assert { type: 'json' };
 export function initTelemetry(version: string): void {
   setVersion(version);
@@ -1279,6 +1284,10 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     }
 
     let skillsDir: string;
+    // Explicitly define skills array here to ensure availability
+    const skills: Skill[] = [];
+    // Define analysis at higher scope
+    let analysis: any = { installer: 'git', dependencies: [] };
 
     if (parsed.type === 'local') {
       // Use local path directly, no cloning needed
@@ -1290,29 +1299,145 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       }
       skillsDir = parsed.localPath!;
       spinner.stop('Local path validated');
+
+      // Local Discovery
+      spinner.start('Discovering skills...');
+      skills.push(...(await discoverSkills(skillsDir, parsed.subpath)));
     } else {
-      // Clone repository for remote sources
-      spinner.start('Cloning repository...');
-      tempDir = await cloneRepo(parsed.url, parsed.ref);
-      skillsDir = tempDir;
-      spinner.stop('Repository cloned');
+      // --- Smart Agent: Remote Analysis & Logic ---
+      spinner.start('Analyzing remote repository...');
+
+      // analysis = { installer: 'git', dependencies: [] }; // Reset if needed, but safe default
+      let shouldClone = true; // Default to cloning (safe)
+      let isTool = false; // If true, we skip full clone and only fetch metadata
+      const myForkOwner = 'crystal9114';
+      const cwd = process.cwd(); // Defined early
+
+      // Metadata placeholders
+      let readmeContent = '';
+      let packageJsonContent = undefined;
+      let repoDescription = 'Auto-added skill';
+      let repoName = parsed.url.split('/').pop()?.replace('.git', '') || 'unknown';
+      let fileList: string[] = []; // Defined early for shared use
+
+      // 1. Remote Pre-Analysis (GitHub Only)
+      if (parsed.type === 'github') {
+        try {
+          const match = parsed.url.match(/github\.com\/([^/]+)\/([^/]+)\.git/);
+          if (match) {
+            const owner = match[1];
+            const repo = match[2];
+            repoName = repo;
+
+            // API Fetch
+            const treeParams = ['api', `repos/${owner}/${repo}/contents`, '--jq', '.[].name'];
+            const treeResult = spawnSync('gh', treeParams, { encoding: 'utf-8' });
+            if (treeResult.status === 0) fileList.push(...treeResult.stdout.trim().split('\n'));
+
+            const readmeParams = ['api', `repos/${owner}/${repo}/readme`, '--jq', '.content'];
+            const readmeRes = spawnSync('gh', readmeParams, { encoding: 'utf-8' });
+            if (readmeRes.status === 0)
+              readmeContent = Buffer.from(readmeRes.stdout.trim(), 'base64').toString('utf-8');
+
+            if (fileList.includes('package.json')) {
+              const pkgParams = [
+                'api',
+                `repos/${owner}/${repo}/contents/package.json`,
+                '--jq',
+                '.content',
+              ];
+              const pkgRes = spawnSync('gh', pkgParams, { encoding: 'utf-8' });
+              if (pkgRes.status === 0)
+                packageJsonContent = Buffer.from(pkgRes.stdout.trim(), 'base64').toString('utf-8');
+            }
+
+            const descParams = ['api', `repos/${owner}/${repo}`, '--jq', '.description'];
+            const descRes = spawnSync('gh', descParams, { encoding: 'utf-8' });
+            if (descRes.status === 0) repoDescription = descRes.stdout.trim();
+
+            // Logic
+            analysis = analyzeContent(readmeContent, fileList, packageJsonContent);
+            p.log.info(
+              chalk.dim(
+                `Remote Analysis: ${analysis.installer} | Deps: ${analysis.dependencies.join(', ')}`
+              )
+            );
+
+            if (analysis.installer === 'npm' || analysis.installer === 'uipro') {
+              isTool = true;
+              shouldClone = false;
+              p.log.info(
+                chalk.green(
+                  `Detected ${analysis.installer} tool. Switching to Light Mode (Metadata Only).`
+                )
+              );
+            } else if (owner.toLowerCase() !== myForkOwner.toLowerCase()) {
+              // It's a complex Git project from upstream -> Auto-Fork
+              p.log.info(chalk.yellow(`\n🚀 Smart Agent detected upstream repo: ${owner}/${repo}`));
+              p.log.info(chalk.dim(`Auto-forking to @${myForkOwner}...`));
+              const forkResult = spawnSync(
+                'gh',
+                ['repo', 'fork', `${owner}/${repo}`, '--clone=false'],
+                { stdio: 'pipe', encoding: 'utf-8' }
+              );
+              if (forkResult.status === 0 || forkResult.stderr.includes('already exists')) {
+                parsed.url = `https://github.com/${myForkOwner}/${repo}.git`;
+                (analysis as any).upstream = `https://github.com/${owner}/${repo}.git`;
+                p.log.success(chalk.green(`Fork ready: ${parsed.url}`));
+              } else {
+                p.log.warn(`Auto-Fork failed: ${forkResult.stderr}`);
+              }
+            }
+          }
+        } catch (e) {
+          p.log.warn(`Remote analysis warning: ${(e as Error).message}`);
+        }
+      }
+
+      // 2. Execution (Clone vs Synthesize)
+      if (shouldClone) {
+        spinner.message('Cloning repository...');
+        tempDir = await cloneRepo(parsed.url, parsed.ref);
+        skillsDir = tempDir;
+        spinner.stop('Repository cloned');
+      } else {
+        // Tool Mode: Synthesize folder with metadata
+        spinner.message('Synthesizing skill metadata...');
+        const synthDir = join(cwd, '.temp_skill_synth_' + Date.now());
+        await mkdir(synthDir, { recursive: true });
+        tempDir = synthDir; // Mark for cleanup
+        skillsDir = synthDir;
+
+        // Write package.json (if any)
+        if (packageJsonContent) {
+          const { writeFile } = await import('fs/promises');
+          await writeFile(join(synthDir, 'package.json'), packageJsonContent);
+        }
+        // Write README.md (if any)
+        if (readmeContent) {
+          const { writeFile } = await import('fs/promises');
+          await writeFile(join(synthDir, 'README.md'), readmeContent);
+        }
+        // Write minimal SKILL.md if not exists (so discovery picks it up)
+        if (!fileList || !fileList.includes('SKILL.md')) {
+          const { writeFile } = await import('fs/promises');
+          const installerType = analysis ? analysis.installer : 'unknown';
+          const synthSkillMd = `---
+name: ${repoName}
+description: ${repoDescription}
+---
+# ${repoName}
+Auto-detected tool (${installerType}).
+`;
+          await writeFile(join(synthDir, 'SKILL.md'), synthSkillMd);
+        }
+        spinner.stop('Metadata synthesized');
+      }
+
+      // Remote Discovery (on the folder we just prepared)
+      spinner.start('Discovering skills...');
+      skills.push(...(await discoverSkills(skillsDir, parsed.subpath)));
     }
-
-    spinner.start('Discovering skills...');
-    const skills = await discoverSkills(skillsDir, parsed.subpath);
-
-    if (skills.length === 0) {
-      spinner.stop(chalk.red('No skills found'));
-      p.outro(
-        chalk.red('No valid skills found. Skills require a SKILL.md with name and description.')
-      );
-      await cleanup(tempDir);
-      process.exit(1);
-    }
-
-    spinner.stop(
-      `Found ${chalk.green(skills.length)} skill${skills.length > 1 ? 's' : ''} ${chalk.dim('(via Well-known Agent Skill Discovery)')}`
-    );
 
     if (options.list) {
       console.log();
@@ -1598,6 +1723,43 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     const failed = results.filter((r) => !r.success);
 
     // Track installation result
+
+    // --- Smart Agent: Manifest Sync ---
+    if (successful.length > 0) {
+      for (const r of successful) {
+        // Re-derive source info
+        let origin = parsed.url;
+        let upstream = null;
+
+        // Re-apply fork logic to determine upstream (simple heuristic)
+        if (origin.includes('crystal9114')) {
+          // If we installed from our fork, try to guess upstream from the input source
+          // If the input source was different from origin (which we swapped), use input as upstream
+          // Simple hack: if source string has github.com/other/repo
+          const sourceMatch = source.match(/github\.com\/([^/]+)\/([^/]+)/);
+          if (sourceMatch) {
+            const [_, owner, repo] = sourceMatch;
+            if (owner !== 'crystal9114') {
+              upstream = `https://github.com/${owner}/${repo}.git`;
+            }
+          }
+        }
+
+        await updateManifest({
+          name: r.skill,
+          description: 'Imported via Smart Agent', // Could try to extract from SKILL.md or package.json
+          origin: origin,
+          upstream: upstream, // We will need to set this better potentially
+          installer: analysis.installer === 'npm' ? 'npm' : 'git', // Map 'npm' to 'npm' installer, others to git default
+          dependencies: analysis.dependencies,
+          commands: [`/${r.skill}`],
+        });
+      }
+
+      // Trigger the big sync
+      await triggerUpdateScript();
+    }
+    // ---------------------------------
     // Build skillFiles map: { skillName: relative path to SKILL.md from repo root }
     const skillFiles: Record<string, string> = {};
     for (const skill of selectedSkills) {
