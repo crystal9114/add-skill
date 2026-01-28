@@ -404,16 +404,18 @@ async function handleRemoteSkill(
 
   const cwd = process.cwd();
 
-  // Check for overwrites
-  const overwriteStatus = new Map<string, boolean>();
-  for (const agent of targetAgents) {
-    overwriteStatus.set(
+  // Check for overwrites (parallel)
+  const overwriteChecks = await Promise.all(
+    targetAgents.map(async (agent) => ({
       agent,
-      await isSkillInstalled(remoteSkill.installName, agent, {
+      installed: await isSkillInstalled(remoteSkill.installName, agent, {
         global: installGlobally,
-      })
-    );
-  }
+      }),
+    }))
+  );
+  const overwriteStatus = new Map(
+    overwriteChecks.map(({ agent, installed }) => [agent, installed])
+  );
 
   // Build installation summary
   const summaryLines: string[] = [];
@@ -809,17 +811,22 @@ async function handleWellKnownSkills(
   const summaryLines: string[] = [];
   const agentNames = targetAgents.map((a) => agents[a].displayName);
 
-  // Check if any skill will be overwritten
-  const overwriteStatus = new Map<string, Map<string, boolean>>();
-  for (const skill of selectedSkills) {
-    const agentStatus = new Map<string, boolean>();
-    for (const agent of targetAgents) {
-      agentStatus.set(
+  // Check if any skill will be overwritten (parallel)
+  const overwriteChecks = await Promise.all(
+    selectedSkills.flatMap((skill) =>
+      targetAgents.map(async (agent) => ({
+        skillName: skill.installName,
         agent,
-        await isSkillInstalled(skill.installName, agent, { global: installGlobally })
-      );
+        installed: await isSkillInstalled(skill.installName, agent, { global: installGlobally }),
+      }))
+    )
+  );
+  const overwriteStatus = new Map<string, Map<string, boolean>>();
+  for (const { skillName, agent, installed } of overwriteChecks) {
+    if (!overwriteStatus.has(skillName)) {
+      overwriteStatus.set(skillName, new Map());
     }
-    overwriteStatus.set(skill.installName, agentStatus);
+    overwriteStatus.get(skillName)!.set(agent, installed);
   }
 
   for (const skill of selectedSkills) {
@@ -895,12 +902,20 @@ async function handleWellKnownSkills(
 
   // Track installation
   const sourceIdentifier = wellKnownProvider.getSourceIdentifier(url);
+
+  // Build skillFiles map: { skillName: sourceUrl }
+  const skillFiles: Record<string, string> = {};
+  for (const skill of selectedSkills) {
+    skillFiles[skill.installName] = skill.sourceUrl;
+  }
+
   track({
     event: 'install',
     source: sourceIdentifier,
     skills: selectedSkills.map((s) => s.installName).join(','),
     agents: targetAgents.join(','),
     ...(installGlobally && { global: '1' }),
+    skillFiles: JSON.stringify(skillFiles),
     sourceType: 'well-known',
   });
 
@@ -1148,16 +1163,18 @@ async function handleDirectUrlSkillLegacy(
   const installMode: InstallMode = 'symlink';
   const cwd = process.cwd();
 
-  // Check for overwrites
-  const overwriteStatus = new Map<string, boolean>();
-  for (const agent of targetAgents) {
-    overwriteStatus.set(
+  // Check for overwrites (parallel)
+  const overwriteChecks = await Promise.all(
+    targetAgents.map(async (agent) => ({
       agent,
-      await isSkillInstalled(remoteSkill.installName, agent, {
+      installed: await isSkillInstalled(remoteSkill.installName, agent, {
         global: installGlobally,
-      })
-    );
-  }
+      }),
+    }))
+  );
+  const overwriteStatus = new Map(
+    overwriteChecks.map(({ agent, installed }) => [agent, installed])
+  );
 
   // Build installation summary
   const summaryLines: string[] = [];
@@ -1347,7 +1364,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     spinner.start('Parsing source...');
     const parsed = parseSource(source);
     spinner.stop(
-      `Source: ${parsed.type === 'local' ? parsed.localPath! : parsed.url}${parsed.ref ? ` @ ${pc.yellow(parsed.ref)}` : ''}${parsed.subpath ? ` (${parsed.subpath})` : ''}`
+      `Source: ${parsed.type === 'local' ? parsed.localPath! : parsed.url}${parsed.ref ? ` @ ${pc.yellow(parsed.ref)}` : ''}${parsed.subpath ? ` (${parsed.subpath})` : ''}${parsed.skillFilter ? ` ${pc.dim('@')}${pc.cyan(parsed.skillFilter)}` : ''}`
     );
 
     // Handle direct URL skills (Mintlify, HuggingFace, etc.) via provider system
@@ -1378,10 +1395,6 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       }
       skillsDir = parsed.localPath!;
       spinner.stop('Local path validated');
-
-      // Local Discovery
-      spinner.start('Discovering skills...');
-      skills.push(...(await discoverSkills(skillsDir, parsed.subpath)));
     } else {
       // --- Smart Agent: Remote Analysis & Logic ---
       spinner.start('Analyzing remote repository...');
@@ -1512,11 +1525,24 @@ Auto-detected tool (${installerType}).
         }
         spinner.stop('Metadata synthesized');
       }
-
-      // Remote Discovery (on the folder we just prepared)
-      spinner.start('Discovering skills...');
-      skills.push(...(await discoverSkills(skillsDir, parsed.subpath)));
     }
+
+    // If skillFilter is present from @skill syntax (e.g., owner/repo@skill-name),
+    // merge it into options.skill (from upstream)
+    if (parsed.skillFilter) {
+      options.skill = options.skill || [];
+      if (!options.skill.includes(parsed.skillFilter)) {
+        options.skill.push(parsed.skillFilter);
+      }
+    }
+
+    // Include internal skills when a specific skill is explicitly requested
+    // (via --skill or @skill syntax) (from upstream)
+    const includeInternal = !!(options.skill && options.skill.length > 0);
+
+    // Unified Discovery (works for both local and remote sources)
+    spinner.start('Discovering skills...');
+    skills.push(...(await discoverSkills(skillsDir, parsed.subpath, { includeInternal })));
 
     if (skills.length === 0) {
       spinner.stop(pc.red('No skills found'));
@@ -1530,6 +1556,7 @@ Auto-detected tool (${installerType}).
     spinner.stop(
       `Found ${pc.green(skills.length)} skill${skills.length > 1 ? 's' : ''} ${pc.dim('(via Smart Agent Discovery)')}`
     );
+
     if (options.list) {
       console.log();
       p.log.step(pc.bold('Available Skills'));
@@ -1731,17 +1758,22 @@ Auto-detected tool (${installerType}).
     const summaryLines: string[] = [];
     const agentNames = targetAgents.map((a) => agents[a].displayName);
 
-    // Check if any skill will be overwritten
-    const overwriteStatus = new Map<string, Map<string, boolean>>();
-    for (const skill of selectedSkills) {
-      const agentStatus = new Map<string, boolean>();
-      for (const agent of targetAgents) {
-        agentStatus.set(
+    // Check if any skill will be overwritten (parallel)
+    const overwriteChecks = await Promise.all(
+      selectedSkills.flatMap((skill) =>
+        targetAgents.map(async (agent) => ({
+          skillName: skill.name,
           agent,
-          await isSkillInstalled(skill.name, agent, { global: installGlobally })
-        );
+          installed: await isSkillInstalled(skill.name, agent, { global: installGlobally }),
+        }))
+      )
+    );
+    const overwriteStatus = new Map<string, Map<string, boolean>>();
+    for (const { skillName, agent, installed } of overwriteChecks) {
+      if (!overwriteStatus.has(skillName)) {
+        overwriteStatus.set(skillName, new Map());
       }
-      overwriteStatus.set(skill.name, agentStatus);
+      overwriteStatus.get(skillName)!.set(agent, installed);
     }
 
     for (const skill of selectedSkills) {
