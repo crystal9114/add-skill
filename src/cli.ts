@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import { runAdd, parseAddOptions, initTelemetry } from './add.ts';
 import { runFind } from './find.ts';
 import { track } from './telemetry.ts';
+import { installSkill as manifestInstallSkill } from './manifest-installer.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -91,14 +92,18 @@ ${BOLD}Usage:${RESET} skills <command> [options]
 ${BOLD}Commands:${RESET}
   find [query]      Search for skills interactively
   init [name]       Initialize a skill (creates <name>/SKILL.md or ./SKILL.md)
-  add <package>     Add a skill package
-                    e.g. vercel-labs/agent-skills
-                         https://github.com/vercel-labs/agent-skills
+  add <package>     Add a skill package (multi-agent, original mode)
+  ${TEXT}manifest <url>${RESET}   ${TEXT}[Antigravity] 添加技能到 manifest（推荐）${RESET}
   check             Check for available skill updates
   update            Update all skills to latest versions
   generate-lock     Generate lock file from installed skills
 
-${BOLD}Add Options:${RESET}
+${BOLD}Manifest Options (Antigravity):${RESET}
+  --fork             自动 fork 仓库到 crystal9114
+  --no-sync          仅写入 manifest，不运行 update-all.ps1
+  --desc "描述"      指定中文描述
+
+${BOLD}Add Options (Legacy):${RESET}
   -g, --global           Install skill globally (user-level) instead of project-level
   -a, --agent <agents>   Specify agents to install to
   -s, --skill <skills>   Specify skill names to install (skip selection prompt)
@@ -112,17 +117,13 @@ ${BOLD}Options:${RESET}
   --dry-run         Preview changes without writing (generate-lock)
 
 ${BOLD}Examples:${RESET}
-  ${DIM}$${RESET} skills find                     ${DIM}# interactive search${RESET}
-  ${DIM}$${RESET} skills find typescript          ${DIM}# search by keyword${RESET}
-  ${DIM}$${RESET} skills find "react testing"    ${DIM}# search by phrase${RESET}
-  ${DIM}$${RESET} skills init my-skill
+  ${DIM}# Antigravity 推荐方式${RESET}
+  ${DIM}$${RESET} skills manifest owner/repo
+  ${DIM}$${RESET} skills manifest owner/repo --fork --desc "技能描述"
+
+  ${DIM}# Legacy multi-agent mode${RESET}
   ${DIM}$${RESET} skills add vercel-labs/agent-skills
-  ${DIM}$${RESET} skills add vercel-labs/agent-skills -g
-  ${DIM}$${RESET} skills add vercel-labs/agent-skills --agent claude-code cursor
-  ${DIM}$${RESET} skills add vercel-labs/agent-skills --skill pr-review commit
-  ${DIM}$${RESET} skills check
-  ${DIM}$${RESET} skills update
-  ${DIM}$${RESET} skills generate-lock --dry-run
+  ${DIM}$${RESET} skills find typescript
 
 Discover more skills at ${TEXT}https://skills.sh/${RESET}
 `);
@@ -712,6 +713,40 @@ async function main(): Promise<void> {
       showLogo();
       const { source, options } = parseAddOptions(restArgs);
       await runAdd(source, options);
+      break;
+    }
+    case 'm':
+    case 'manifest': {
+      showLogo();
+      console.log();
+      // 解析 manifest 命令参数
+      const repoUrl = restArgs[0];
+      if (!repoUrl) {
+        console.log(`${TEXT}Usage:${RESET} skills manifest <repo-url> [options]`);
+        console.log();
+        console.log(`${DIM}Options:${RESET}`);
+        console.log(`  --fork          自动 fork 仓库到 crystal9114`);
+        console.log(`  --no-sync       仅写入 manifest，不运行 update-all.ps1`);
+        console.log(`  --desc "..."    指定中文描述`);
+        break;
+      }
+
+      // 解析选项
+      const fork = restArgs.includes('--fork');
+      const noSync = restArgs.includes('--no-sync');
+      const descIdx = restArgs.indexOf('--desc');
+      const description = descIdx >= 0 ? restArgs[descIdx + 1] : undefined;
+
+      try {
+        const result = await manifestInstallSkill(repoUrl, {
+          fork,
+          noSync,
+          description,
+        });
+        console.log(`\n${result.success ? '✅' : '❌'} ${result.message}`);
+      } catch (error) {
+        console.error(`❌ 安装失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      }
       break;
     }
     case 'check':
